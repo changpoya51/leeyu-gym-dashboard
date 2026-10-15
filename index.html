@@ -68,6 +68,16 @@ function safeParse(s){try{return JSON.parse(s)}catch{return null}}
 const saved=safeParse(localStorage.getItem(DB_KEY));
 let db=saved&&saved.version===1?saved:{version:1,months:structuredClone(SEED.months),records:structuredClone(SEED.records)};
 let config=safeParse(localStorage.getItem(CLOUD_CONF_KEY))||{url:'https://uwkbefbrbacemuymfjoi.supabase.co',key:'sb_publishable_l1trw696YqMVk2fff_CFQQ_0FY95XGX'};
+const recoveryLinkParams=new URLSearchParams(window.location.hash.slice(1));
+const recoveryState={
+  token:recoveryLinkParams.get('type')==='recovery'?recoveryLinkParams.get('access_token'):null,
+  error:recoveryLinkParams.get('error_description')||recoveryLinkParams.get('error_code')||null
+};
+if(recoveryState.token||recoveryState.error){
+  // Reset links contain access tokens in the URL fragment. Remove before rendering anything.
+  window.history.replaceState(null,'',window.location.pathname+window.location.search);
+}
+
 let session=safeParse(localStorage.getItem(CLOUD_SESSION_KEY))||null;
 let profile=null,staffProfiles=[];
 let page='overview',month='2026-10',week='2026-10-07',busySync=false,toastTimeout=null,pending=new Set();
@@ -180,7 +190,7 @@ function renderImport(){const editable=canImport();return `${sectionHead('DATA M
 function renderCloud(){let logged=Boolean(session?.access_token),role=profile?`${roleName(profile.role)} / ${deptLabels[profile.department]||profile.department}`:'尚未讀取帳號權限';return `${sectionHead('CLOUD COLLABORATION','雲端同步｜多主管共同填報','使用 Supabase 資料庫、Email 登入與部門權限。設定後，不同電腦能讀取同一份營運資料。')}
  ${logged?infoNotice(`已登入 ${session.user?.email||''}，帳號權限：${role}`):infoNotice('尚未連接可用的雲端帳號。目前資料僅存於這部電腦的瀏覽器，不能跨裝置共享。','bad')}
  <div class="two-cols"><section class="panel"><h3>① 專案連線設定</h3><p class="subtxt mt12">請先依「雲端建置說明」在 Supabase 執行附檔 SQL，設定使用者帳號與部門角色。</p><div class="form-grid mt18"><label class="field span2">Supabase Project URL<input id="cloudUrl" type="url" placeholder="https://your-project.supabase.co" value="${esc(config.url||'')}" /></label><label class="field span2">Supabase 公開 anon / publishable API Key<input id="cloudKey" type="text" placeholder="sb_publishable_... 或 eyJ..." value="${esc(config.key||'')}"/><small>不可填入 service_role 或 secret key，專案的管理金鑰不得放在前端。</small></label></div><div class="flex mt18"><button class="btn primary" id="saveCloudConfig">儲存連線設定</button></div>
- <div class="divider"></div><h3>② 使用者登入</h3><div class="form-grid mt18"><label class="field">電子郵件<input type="email" id="loginEmail" autocomplete="username" placeholder="主管公司信箱" value="${esc(session?.user?.email||'')}" /></label><label class="field">密碼<input type="password" id="loginPassword" autocomplete="current-password" placeholder="Supabase Auth 密碼" /></label></div><div class="flex mt18"><button class="btn primary" id="loginBtn">登入並讀取雲端</button><button class="btn" id="logoutBtn" ${!logged?'disabled':''}>登出</button><span class="text-sm muted">${logged?'☁ 已登入':'🔒 尚未登入'}</span></div></section>
+ <div class="divider"></div><h3>② 使用者登入</h3><div class="form-grid mt18"><label class="field">電子郵件<input type="email" id="loginEmail" autocomplete="username" placeholder="主管公司信箱" value="${esc(session?.user?.email||'')}" /></label><label class="field">密碼<input type="password" id="loginPassword" autocomplete="current-password" placeholder="Supabase Auth 密碼" /></label></div><div class="flex mt18"><button class="btn primary" id="loginBtn">登入並讀取雲端</button><button class="btn soft" id="forgotPasswordBtn">忘記密碼？寄送重設信</button><button class="btn" id="logoutBtn" ${!logged?'disabled':''}>登出</button><span class="text-sm muted">${logged?'☁ 已登入':'🔒 尚未登入'}</span></div></section>
  <section class="panel"><h3>③ 雲端資料管理</h3><div class="cloud-state mt18">${profile?.active?`<span class="statusgood">●</span> 已完成授權｜角色 ${esc(role)}。資料依權限同步。`:'⏳ 登入並取得有效部門授權，才能使用共用資料。'}</div><div class="flex mt18"><button class="btn primary" id="pullCloudBtn" ${!profile?.active?'disabled':''}>↓ 讀取雲端更新</button><button class="btn" id="pushCloudBtn" ${!canManageUsers()?'disabled':''}>↑ 首次上傳本機資料</button></div><p class="subtxt mt12">首次上傳會將本機全部既有資料寫入雲端。若雲端已有同仁填報，請先讀取，確認沒有衝突再執行上傳。</p><div class="divider"></div><h3>部門存取邏輯</h3>${[['管理員','可檢視與編修全部部門、目標及週結論'],['部門主管','可檢視各部門，僅可修改所屬部門資料'],['總經理室管理員','可維護 KPI 目標及主管帳號／權限'],['唯讀角色','只能檢視，不可修改雲端數據']].map(([t,d])=>`<div class="setup-step"><div><b>${t}</b><span class="muted">${d}</span></div></div>`).join('')}</section></div>${canManageUsers()?`<section class="panel mt18"><h3>④ 總經理室系統管理</h3><p class="subtxt mt12">可新增主管權限、調整部門與停用帳號。使用者需先在 Supabase Authentication 建立。</p><button class="btn primary mt18" data-page="accounts">開啟主管帳號管理 →</button></section>`:''}` }
 function roleName(x){return {admin:'系統管理員',manager:'部門主管',viewer:'唯讀人員'}[x]||'未授權'}
 function deptOptions(selected){return Object.entries(deptLabels).map(([v,t])=>`<option value="${v}" ${v===selected?'selected':''}>${esc(t)}</option>`).join('')}
@@ -244,6 +254,82 @@ async function importFiles(files){if(!canImport()){toast('目前帳號沒有 Exc
 function cloudHeaders(token=session?.access_token){return {'apikey':config.key,'Content-Type':'application/json',...(token?{'Authorization':'Bearer '+token}:{})}}
 function cloudBase(){let url=String(config.url||'').trim().replace(/\/+$/,'');if(!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)&&!/^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(url))throw Error('請填寫正確的 HTTPS Supabase 專案網址');if(!config.key||config.key.length<16)throw Error('請填正確的公開 API Key');return url}
 async function cloudRequest(path,opts={}){const response=await fetch(cloudBase()+path,{...opts,headers:{...cloudHeaders(),...(opts.headers||{})}});const text=await response.text();let obj=safeParse(text);if(!response.ok)throw Error(obj?.message||obj?.error_description||obj?.msg||text.slice(0,180)||`HTTP ${response.status}`);return obj}
+
+function showRecoveryScreen(){
+ const screen=document.createElement('div');
+ screen.id='recoveryOverlay';
+ screen.setAttribute('role','main');
+ screen.style.cssText='position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:#f4f8fb;padding:18px;overflow:auto';
+ screen.innerHTML=`<section style="background:white;border:1px solid #e1eaf0;border-radius:18px;padding:32px;width:min(480px,100%);box-shadow:0 16px 42px #00335018">
+ <div style="font-size:13px;color:#004270;font-weight:900;letter-spacing:.04em">ALPHA TRAINING GYM</div>
+ <h1 style="margin:14px 0 6px;color:#003957;font-size:24px">重設力羽健身管理系統密碼</h1>
+ <p style="font-size:13px;line-height:1.8;color:#587387">請設定新的登入密碼。此畫面僅限透過有效的密碼重設郵件進入。</p>
+ <form id="recoveryForm" style="display:grid;gap:14px;margin-top:20px">
+ <label style="display:grid;gap:6px;font-size:13px;font-weight:700">新密碼
+ <input id="recoveryNewPassword" type="password" autocomplete="new-password" minlength="12" required placeholder="請輸入至少 12 個字元" style="width:100%;padding:12px;border:1px solid #ccdbe5;border-radius:8px"></label>
+ <label style="display:grid;gap:6px;font-size:13px;font-weight:700">確認新密碼
+ <input id="recoveryConfirmPassword" type="password" autocomplete="new-password" minlength="12" required placeholder="請再次輸入新密碼" style="width:100%;padding:12px;border:1px solid #ccdbe5;border-radius:8px"></label>
+ <button type="submit" id="recoverySubmit" style="padding:13px;border:0;border-radius:9px;background:#004270;color:white;font-weight:800;cursor:pointer">設定新密碼</button></form>
+ <p id="recoveryMessage" role="status" aria-live="polite" style="min-height:22px;color:#ab3546;font-size:13px;line-height:1.8"></p>
+ <a href="https://changpoya51.github.io/leeyu-gym-dashboard/" style="font-size:13px">返回登入畫面</a>
+ </section>`;
+ document.body.appendChild(screen);
+ const message=screen.querySelector('#recoveryMessage');
+ if(recoveryState.error || !recoveryState.token){
+   screen.querySelector('#recoveryForm').hidden=true;
+   message.textContent='重設連結無效或已過期。請回到登入畫面重新寄送密碼重設信。';
+   return;
+ }
+ screen.querySelector('#recoveryForm').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const p=screen.querySelector('#recoveryNewPassword').value;
+  const confirm=screen.querySelector('#recoveryConfirmPassword').value;
+  if(p.length<12){message.textContent='為保護主管帳號，請使用至少 12 個字元的密碼。';return}
+  if(p!==confirm){message.textContent='兩次輸入的密碼不相同。';return}
+  const button=screen.querySelector('#recoverySubmit');
+  button.disabled=true;
+  message.style.color='#587387';
+  message.textContent='正在更新密碼…';
+  try{
+    const response=await fetch(cloudBase()+'/auth/v1/user',{
+      method:'PUT',
+      headers:cloudHeaders(recoveryState.token),
+      body:JSON.stringify({password:p})
+    });
+    const raw=await response.text();
+    const data=safeParse(raw);
+    if(!response.ok)throw Error(data?.msg||data?.message||data?.error_description||'無法更新密碼，請重新寄送密碼重設信。');
+    recoveryState.token=null;
+    localStorage.removeItem(CLOUD_SESSION_KEY);
+    session=null; profile=null;
+    screen.querySelector('#recoveryForm').hidden=true;
+    message.style.color='#16806f';
+    message.textContent='密碼已更新，請返回登入畫面，使用新密碼登入。';
+  }catch(e){
+    message.style.color='#ab3546';
+    message.textContent='密碼更新失敗：'+e.message;
+  }finally{
+    button.disabled=false;
+    screen.querySelector('#recoveryNewPassword').value='';
+    screen.querySelector('#recoveryConfirmPassword').value='';
+  }
+ });
+}
+async function requestPasswordReset(){
+ const email=document.getElementById('loginEmail')?.value.trim();
+ if(!email){toast('請先輸入管理員帳號的 Email，再按寄送重設信。');return}
+ const button=document.getElementById('forgotPasswordBtn');
+ button.disabled=true;
+ try{
+  const redirectTo=window.location.origin+window.location.pathname;
+  await cloudRequest('/auth/v1/recover?redirect_to='+encodeURIComponent(redirectTo),{
+   method:'POST',body:JSON.stringify({email})
+  });
+  toast('若帳號存在，將寄送密碼重設信。請查看電子郵件及垃圾郵件。');
+ }catch(e){
+  toast('無法寄送重設信：'+e.message);
+ }finally{button.disabled=false}
+}
 async function loginCloud(){try{const email=document.getElementById('loginEmail').value.trim(),password=document.getElementById('loginPassword').value;if(!email||!password){toast('請輸入電子郵件與密碼');return}const obj=await cloudRequest('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email,password})});session={...obj,expires_at:Date.now()+obj.expires_in*1000};localStorage.setItem(CLOUD_SESSION_KEY,JSON.stringify(session));await loadProfile();if(!profile?.active)throw Error('此帳號未啟用或尚未完成部門授權，請聯絡總經理室');if(REQUIRE_LOGIN){db={version:1,months:{},records:{}};persist()}await pullCloud();if(canManageUsers())await loadProfiles();toast('登入完成，已讀取雲端資料。');render()}catch(e){session=null;profile=null;localStorage.removeItem(CLOUD_SESSION_KEY);toast('登入失敗：'+e.message);render()}}
 async function loadProfile(){if(!session?.user?.id)return;try{const a=await cloudRequest('/rest/v1/gym_profiles?select=department,role,active&user_id=eq.'+encodeURIComponent(session.user.id));profile=Array.isArray(a)?a[0]:null;if(!profile?.active)toast('此帳號尚未設定有效的部門權限。')}catch(e){profile=null;toast('讀取帳號權限失敗：'+e.message)}}
 async function refreshToken(){if(!session?.refresh_token)return false;if(Date.now()<session.expires_at-90000)return true;try{const obj=await cloudRequest('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:JSON.stringify({refresh_token:session.refresh_token})});session={...obj,expires_at:Date.now()+obj.expires_in*1000};localStorage.setItem(CLOUD_SESSION_KEY,JSON.stringify(session));return true}catch{session=null;profile=null;localStorage.removeItem(CLOUD_SESSION_KEY);toast('雲端登入已過期，請重新登入。');return false}}
@@ -266,6 +352,7 @@ document.addEventListener('click',async e=>{const p=e.target.closest('[data-page
  if(e.target.id==='exportTopBtn'||e.target.id==='exportExcelBtn'){exportExcel();return}if(e.target.id==='exportJsonBtn'){exportBackup();toast('已匯出全部資料 JSON 備份');return}if(e.target.id==='printMeeting'){printMeeting();return}
  if(e.target.id==='uploadBox'||(e.target.closest('#uploadBox')&&e.target.id!=='fileInput')){if(!canImport()){toast('您沒有匯入權限');return}document.getElementById('fileInput')?.click();return}
  if(e.target.id==='saveCloudConfig'){let u=document.getElementById('cloudUrl').value.trim(),k=document.getElementById('cloudKey').value.trim();if(/service_role|sb_secret_/.test(k)){toast('請勿使用 service_role 或 secret key！');return}config={url:u,key:k};try{cloudBase()}catch(err){toast(err.message);return}localStorage.setItem(CLOUD_CONF_KEY,JSON.stringify(config));toast('已儲存專案網址與公開金鑰');render();return}
+ if(e.target.id==='forgotPasswordBtn'){await requestPasswordReset();return}
  if(e.target.id==='loginBtn'){await loginCloud();return}if(e.target.id==='logoutBtn'){session=null;profile=null;staffProfiles=[];pending.clear();localStorage.removeItem(CLOUD_SESSION_KEY);if(REQUIRE_LOGIN){db={version:1,months:{},records:{}};localStorage.removeItem(DB_KEY)}toast(REQUIRE_LOGIN?'已登出，這台電腦的營運快取已清除。':'已登出雲端，這台電腦的本機展示資料仍會保留。');render();return}
  if(e.target.id==='pullCloudBtn'){await pullCloud();return}if(e.target.id==='pushCloudBtn'){await pushAll();return}
  if(e.target.id==='syncTopBtn'){if(session?.access_token){await pullCloud()}else navigate('cloud');return}
@@ -278,7 +365,11 @@ document.addEventListener('change',e=>{const el=e.target;if(el.id==='monthSelect
  });
 const box=document.getElementById('main');box.addEventListener('dragover',e=>{if(e.target.closest('#uploadBox')){e.preventDefault();e.target.closest('#uploadBox').classList.add('dragover')}});box.addEventListener('dragleave',e=>{if(e.target.closest('#uploadBox'))e.target.closest('#uploadBox').classList.remove('dragover')});box.addEventListener('drop',e=>{const area=e.target.closest('#uploadBox');if(area){e.preventDefault();area.classList.remove('dragover');if(!canImport()){toast('您沒有 Excel 匯入權限');return}importFiles([...e.dataTransfer.files])}});
 setInterval(async()=>{if(!session?.access_token||document.hidden||busySync)return;const active=document.activeElement;if(active&&['INPUT','TEXTAREA','SELECT'].includes(active.tagName))return;await pullCloud(true)},45000);
-render();if(session?.access_token){refreshToken().then(ok=>ok&&loadProfile()).then(()=>{render();if(profile?.active){pullCloud(true);if(canManageUsers())loadProfiles()}})}
+if(recoveryState.token||recoveryState.error){
+ showRecoveryScreen();
+}else{
+ render();if(session?.access_token){refreshToken().then(ok=>ok&&loadProfile()).then(()=>{render();if(profile?.active){pullCloud(true);if(canManageUsers())loadProfiles()}})}
+}
 </script>
 </body>
 </html>
